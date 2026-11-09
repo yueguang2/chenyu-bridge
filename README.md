@@ -1,5 +1,6 @@
 # 云GPU中间件（Chenyu Bridge）
 
+[![CI](https://github.com/yueguang2/yun-gpu-middleware/actions/workflows/ci.yml/badge.svg)](https://github.com/yueguang2/yun-gpu-middleware/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
@@ -78,6 +79,10 @@ docker build -t chenyu-bridge:latest .
 
 - 数据（`data/`：settings/presets/tasks/日志/上传工作流）已被 `.gitignore` 忽略，务必挂载卷持久化。
 - 生成真实消耗 GPU 费用；请按需设置每日预算、最低余额与业务接口密钥，公网部署务必开启鉴权。
+
+## 参与贡献
+
+欢迎提交 Issue 和 Pull Request，详细约定见 [CONTRIBUTING.md](CONTRIBUTING.md)；安全问题请按 [SECURITY.md](SECURITY.md) 私密报告，不要公开提交 Issue。
 
 ## 许可证
 
