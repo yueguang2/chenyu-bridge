@@ -152,7 +152,7 @@
   },
   "18": {
     "inputs": {
-      "lora_name": "KOOK-MOSS-SFT-观澜.safetensors",
+      "lora_name": "MOSS/KOOK-MOSS-SFT-观澜.safetensors",
       "strength_model": 0.9,
       "model": [
         "12",
@@ -289,7 +289,7 @@
   },
   "95": {
     "inputs": {
-      "lora_name": "KOOK-MOSS-Base-观澜.safetensors",
+      "lora_name": "MOSS/KOOK-MOSS-Base-观澜.safetensors",
       "strength_model": 0.9,
       "model": [
         "94",
