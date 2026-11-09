@@ -1,0 +1,11 @@
+{
+  "name": "yun-gpu-middleware",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "独立可部署的云 GPU 中间件：把晨羽 Pod + ComfyUI 工作流包装为 OpenAI/newapi 风格媒体 API，自带管理控制台",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test"
+  }
+}
