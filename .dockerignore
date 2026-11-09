@@ -1,0 +1,9 @@
+# 构建上下文忽略（避免把运行数据/密钥/依赖送进构建上下文）
+.git
+.gitignore
+data
+node_modules
+*.log
+.env
+.DS_Store
+test
