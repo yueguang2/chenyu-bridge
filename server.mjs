@@ -6,13 +6,54 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { config, GPU_ALIASES } from './config.mjs';
+import { config, GPU_ALIASES, ASPECT_LABELS } from './config.mjs';
 import { runTask, parseModel, chenyu, bridgeInstances, bridgeAccount, armIdleForKnownInstances, pruneOldFiles, budgetHistory, workflowExists, warmInstance } from './lib.mjs';
 import { loadRuntimeSettings, currentSettings, saveRuntimeSettings, installLogCapture, recentLogs, clearLogs, logEvent, currentAdminToken, logFileInfo, readLogFile, currentBridgeApiKey } from './runtime.mjs';
 import { loadPresets, listWorkflows, getWorkflow, upsertWorkflow, deleteWorkflow, saveWorkflowFile, readWorkflowFile, presetsMeta } from './presets.mjs';
 import { analyzeWorkflow } from './workflow-analyzer.mjs';
 
 loadRuntimeSettings();
+
+// ---- 画幅解析：兼容 OpenAI 的 size(WxH)、N:N、aspect_ratio 及 竖/横/方 关键字 ----
+const ASPECT_KEYS = Object.keys(ASPECT_LABELS);
+function nearestAspect(w, h) {
+  const target = w / h;
+  let best = '16:9', bestDiff = Infinity;
+  for (const k of ASPECT_KEYS) {
+    const [a, b] = k.split(':').map(Number);
+    if (!a || !b) continue;
+    const diff = Math.abs(Math.log(target / (a / b)));
+    if (diff < bestDiff) { bestDiff = diff; best = k; }
+  }
+  return best;
+}
+function resolveAspect(body, fallback = '16:9') {
+  const b = body || {};
+  const explicit = String(b.aspect_ratio || b.ratio || '').trim();
+  if (explicit) {
+    if (ASPECT_LABELS[explicit]) return explicit;
+    const m0 = /^(\d+)\s*:\s*(\d+)$/.exec(explicit);
+    if (m0) { const k = `${m0[1]}:${m0[2]}`; return ASPECT_LABELS[k] ? k : nearestAspect(+m0[1], +m0[2]); }
+  }
+  const size = String(b.size || '').trim().toLowerCase();
+  if (size) {
+    const nn = /^(\d+)\s*:\s*(\d+)$/.exec(size);
+    if (nn) { const k = `${nn[1]}:${nn[2]}`; return ASPECT_LABELS[k] ? k : nearestAspect(+nn[1], +nn[2]); }
+    const wh = /^(\d+)\s*[x×]\s*(\d+)$/.exec(size);
+    if (wh) { const w = +wh[1], h = +wh[2]; if (w > 0 && h > 0) return nearestAspect(w, h); }
+    if (/portrait|tall|竖/.test(size)) return '9:16';
+    if (/landscape|wide|横/.test(size)) return '16:9';
+    if (/square|方/.test(size)) return '1:1';
+  }
+  return fallback;
+}
+// 从 OpenAI size(WxH) 估算百万像素，仅在未显式给 megapixels/resolution 时使用
+function megapixelsFromSize(body) {
+  const size = String((body && body.size) || '').trim().toLowerCase();
+  const wh = /^(\d+)\s*[x×]\s*(\d+)$/.exec(size);
+  if (wh) { const w = +wh[1], h = +wh[2]; if (w > 0 && h > 0) return Math.round((w * h / 1e6) * 100) / 100; }
+  return null;
+}
 loadPresets();
 installLogCapture();
 
@@ -199,7 +240,8 @@ async function handle(req, res) {
     const { presetKey, gpuAlias } = parseModel(body.model);
     if (!config.presets[presetKey]) return send(res, 400, { error: { message: '未知模型 ' + body.model } });
     const inp = body.input || {}; const prm = body.parameters || {};
-    const params = { prompt: inp.prompt, media: inp.media || [], ratio: prm.ratio, duration: prm.duration, resolution: prm.resolution, megapixels: prm.megapixels };
+    const ratio = resolveAspect({ aspect_ratio: prm.aspect_ratio, ratio: prm.ratio, size: prm.size || body.size }, '16:9');
+    const params = { prompt: inp.prompt, media: inp.media || [], ratio, duration: prm.duration, resolution: prm.resolution, megapixels: prm.megapixels };
     const dedupKey = dedupKeyFor(body.idempotencyKey || req.headers['idempotency-key'], body.model, params);
     const dup = findDuplicate(dedupKey);
     if (dup) { logEvent('info', `幂等命中：复用任务 ${dup.id}`); return send(res, 200, { id: dup.id, status: dup.status === 'succeeded' ? 'succeeded' : 'pending', object: 'video' }); }
@@ -216,8 +258,10 @@ async function handle(req, res) {
     const { presetKey, gpuAlias } = parseModel(body.model);
     const preset = config.presets[presetKey];
     if (!preset) return send(res, 400, { error: { message: '未知模型 ' + body.model } });
-    const ratio = /^[0-9]+:[0-9]+$/.test(String(body.size || '')) ? body.size : (body.aspect_ratio || '16:9');
-    const params = { prompt: body.prompt, ratio, megapixels: body.megapixels, resolution: body.resolution };
+    const ratio = resolveAspect(body);
+    let megapixels = body.megapixels != null ? Number(body.megapixels) : undefined;
+    if (megapixels == null && !body.resolution) { const mp = megapixelsFromSize(body); if (mp) megapixels = mp; }
+    const params = { prompt: body.prompt, ratio, megapixels, resolution: body.resolution };
     const dedupKey = dedupKeyFor(body.idempotencyKey || req.headers['idempotency-key'], body.model, params);
     const dup = findDuplicate(dedupKey);
     if (dup) {
