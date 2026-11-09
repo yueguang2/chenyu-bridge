@@ -4,6 +4,30 @@
   "private": true,
   "type": "module",
   "description": "独立可部署的云 GPU 中间件：把晨羽 Pod + ComfyUI 工作流包装为 OpenAI/newapi 风格媒体 API，自带管理控制台",
+  "license": "MIT",
+  "author": "yueguang2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yueguang2/yun-gpu-middleware.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yueguang2/yun-gpu-middleware/issues"
+  },
+  "homepage": "https://github.com/yueguang2/yun-gpu-middleware#readme",
+  "keywords": [
+    "comfyui",
+    "gpu",
+    "openai-api",
+    "image-generation",
+    "video-generation",
+    "middleware",
+    "chenyu",
+    "newapi",
+    "docker"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test"

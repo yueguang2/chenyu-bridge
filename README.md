@@ -1,5 +1,9 @@
 # 云GPU中间件（Chenyu Bridge）
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
+[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
+
 把「晨羽智云 Pod 实例 + ComfyUI 工作流」包装成 HTTP 服务，**自带管理控制台、可独立部署**；
 对外提供图片/视频生成接口，也可作为影策（open-ai-canvas）的系统渠道接入。纯 Node 服务，无第三方依赖。
 
@@ -74,3 +78,7 @@ docker build -t chenyu-bridge:latest .
 
 - 数据（`data/`：settings/presets/tasks/日志/上传工作流）已被 `.gitignore` 忽略，务必挂载卷持久化。
 - 生成真实消耗 GPU 费用；请按需设置每日预算、最低余额与业务接口密钥，公网部署务必开启鉴权。
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE) 许可证。
