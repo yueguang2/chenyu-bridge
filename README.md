@@ -1,6 +1,6 @@
-# 云GPU中间件（Chenyu Bridge）
+# Chenyu Bridge · 云GPU中间件
 
-[![CI](https://github.com/yueguang2/yun-gpu-middleware/actions/workflows/ci.yml/badge.svg)](https://github.com/yueguang2/yun-gpu-middleware/actions/workflows/ci.yml)
+[![CI](https://github.com/yueguang2/chenyu-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/yueguang2/chenyu-bridge/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
