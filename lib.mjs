@@ -173,7 +173,10 @@ export async function comfyUpload(base, buf, filename, mime) {
 export async function comfyQueue(base, prompt) {
   const r = await fetch(base + '/prompt', { method: 'POST', headers: ch({ 'content-type': 'application/json' }), body: JSON.stringify({ prompt, client_id: 'bridge-' + Date.now() }) });
   const j = await r.json();
-  if (j.node_errors && Object.keys(j.node_errors).length) throw new Error('ComfyUI 校验失败: ' + JSON.stringify(j.node_errors).slice(0, 400));
+  if (j.node_errors && Object.keys(j.node_errors).length) {
+    // 由静态工作流产生的 node_errors 都是确定性配置问题（不可重试）
+    throw configError('ComfyUI 校验失败: ' + JSON.stringify(j.node_errors).slice(0, 400), j.node_errors);
+  }
   if (!j.prompt_id) throw new Error('ComfyUI 未返回 prompt_id');
   return j.prompt_id;
 }
@@ -200,6 +203,56 @@ export async function comfyView(base, file) {
   const r = await fetch(base + '/view?' + q.toString(), { headers: ch() });
   if (!r.ok) throw new Error('ComfyUI 取文件失败 ' + r.status);
   return Buffer.from(await r.arrayBuffer());
+}
+
+// 提交前资源校验：对工作流里带“文件下拉”的 loader 节点，核对取值是否在当前 Pod 的
+// object_info 白名单里（可提前发现 LoRA/模型子目录漂移，避免开机后才发现、也给出相近候选）。
+const PREFLIGHT_CLASSES = new Set([
+  'LoraLoaderModelOnly', 'LoraLoader', 'UNETLoader', 'CheckpointLoaderSimple',
+  'VAELoader', 'CLIPLoader', 'CLIPVisionLoader', 'SelfLiftH3Sampler', 'ModelPreviewOverrideKJ',
+]);
+function configError(msg, details) {
+  const e = new Error(msg);
+  e.code = 'CONFIG';
+  e.nonRetryable = true;
+  if (details) e.details = details;
+  return e;
+}
+export async function preflightWorkflow(base, wf) {
+  const classes = new Set(Object.values(wf).map((n) => n.class_type).filter((c) => PREFLIGHT_CLASSES.has(c)));
+  if (!classes.size) return;
+  const errors = [];
+  for (const cls of classes) {
+    let oi;
+    try {
+      const r = await fetch(base + '/object_info/' + encodeURIComponent(cls), { headers: ch() });
+      if (!r.ok) continue;
+      oi = await r.json();
+    } catch { continue; }
+    const schema = oi && oi[cls] && oi[cls].input;
+    if (!schema) { errors.push({ type: 'class_missing', class_type: cls }); continue; }
+    const req = { ...(schema.required || {}), ...(schema.optional || {}) };
+    for (const [nid, node] of Object.entries(wf)) {
+      if (node.class_type !== cls) continue;
+      for (const [inp, val] of Object.entries(node.inputs || {})) {
+        if (typeof val !== 'string') continue;
+        const def = req[inp];
+        if (!Array.isArray(def)) continue;
+        const list = def[0];
+        if (Array.isArray(list) && list.length && typeof list[0] === 'string' && !list.includes(val)) {
+          const baseName = String(val).split('/').pop();
+          const hint = list.filter((x) => String(x).split('/').pop() === baseName).slice(0, 5);
+          errors.push({ type: 'value_not_in_list', class_type: cls, node: nid, input: inp, value: val, hint });
+        }
+      }
+    }
+  }
+  if (errors.length) {
+    const summary = errors.map((e) => e.type === 'class_missing'
+      ? `缺少节点类 ${e.class_type}`
+      : `${e.class_type}.${e.input}='${e.value}'${e.hint && e.hint.length ? '（相近：' + e.hint.join(' / ') + '）' : ''}`).join('；');
+    throw configError('工作流资源与当前实例不匹配：' + summary.slice(0, 500), errors);
+  }
 }
 
 // ---------------- 工作流填充 ----------------
@@ -436,6 +489,8 @@ export async function runTask(presetKey, gpuAlias, params, taskId, onStage = () 
         (kind === 'video' ? media.videos : kind === 'audio' ? media.audios : media.images).push(fname);
       }
       const wf = fillWorkflow(loadWorkflow(preset.workflowFile), preset.mapping, params, media);
+      onStage('校验工作流资源');
+      await preflightWorkflow(base, wf);
       onStage('生成中');
       const promptId = await comfyQueue(base, wf);
       const hist = await comfyWaitHistory(base, promptId);

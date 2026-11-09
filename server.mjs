@@ -122,6 +122,33 @@ function submissionGuard(res) {
   return true;
 }
 
+// ---- 配置类错误熔断：同一 preset 连续“工作流配置错误”则短暂拒绝，避免反复开机烧钱 ----
+const CONFIG_FAIL_THRESHOLD = Number(process.env.BRIDGE_CONFIG_FAIL_THRESHOLD || 4);
+const CONFIG_COOLDOWN_MS = Number(process.env.BRIDGE_CONFIG_COOLDOWN_SEC || 300) * 1000;
+const CONFIG_FAIL_WINDOW_MS = 10 * 60 * 1000;
+const presetConfigState = new Map();
+function isConfigError(e) { return !!(e && (e.code === 'CONFIG' || e.nonRetryable)); }
+function noteTaskSuccess(presetKey) { const s = presetConfigState.get(presetKey); if (s) { s.count = 0; s.blockedUntil = 0; } }
+function noteTaskFailure(presetKey, e) {
+  if (!isConfigError(e)) return;
+  const now = Date.now(); let s = presetConfigState.get(presetKey);
+  if (!s || now - (s.firstAt || 0) > CONFIG_FAIL_WINDOW_MS) s = { count: 0, firstAt: now, lastError: '', blockedUntil: 0 };
+  s.count += 1; s.lastError = String((e && e.message) || e).slice(0, 300);
+  if (s.count >= CONFIG_FAIL_THRESHOLD) { s.blockedUntil = now + CONFIG_COOLDOWN_MS; logEvent('warn', `模型 ${presetKey} 连续配置错误 ${s.count} 次，暂停 ${Math.round(CONFIG_COOLDOWN_MS / 1000)}s 以避免反复开机`); }
+  presetConfigState.set(presetKey, s);
+}
+function presetBlocked(presetKey) {
+  const s = presetConfigState.get(presetKey);
+  if (s && s.blockedUntil && Date.now() < s.blockedUntil) return s;
+  return null;
+}
+function rejectIfBlocked(res, presetKey) {
+  const b = presetBlocked(presetKey);
+  if (!b) return false;
+  send(res, 503, { error: { message: `模型 ${presetKey} 工作流配置异常，已暂停 ${Math.ceil((b.blockedUntil - Date.now()) / 1000)}s，请检查工作流资源：${b.lastError}` } });
+  return true;
+}
+
 // ---- SSE：任务状态实时推送（管理后台用）----
 const sseClients = new Set();
 let sseTimer = null;
@@ -183,11 +210,11 @@ function startTask(task, presetKey, gpuAlias, params) {
   runTask(presetKey, gpuAlias, params, task.id, (s) => { task.message = s; task.updatedAt = Date.now(); broadcastTasks(); })
     .then((r) => {
       if (task.cancelled) { task.status = 'cancelled'; task.message = '任务已取消'; task.updatedAt = Date.now(); logEvent('info', `任务已取消 ${task.id}`); persistTasks(); broadcastTasks(); return; }
-      task.status = 'succeeded'; task.kind = r.kind; task.url = `${PUBLIC_BASE}/files/${r.file}`; task.message = null; task.updatedAt = Date.now(); logEvent('info', `任务成功 ${task.id}`); persistTasks(); broadcastTasks();
+      task.status = 'succeeded'; task.kind = r.kind; task.url = `${PUBLIC_BASE}/files/${r.file}`; task.message = null; task.updatedAt = Date.now(); logEvent('info', `任务成功 ${task.id}`); noteTaskSuccess(presetKey); persistTasks(); broadcastTasks();
     })
     .catch((e) => {
       if (task.cancelled) { task.status = 'cancelled'; task.message = '任务已取消'; task.updatedAt = Date.now(); logEvent('info', `任务已取消 ${task.id}`); persistTasks(); broadcastTasks(); return; }
-      task.status = 'failed'; task.message = String((e && e.message) || e); task.updatedAt = Date.now(); logEvent('error', `任务失败 ${task.id}: ${task.message}`); persistTasks(); broadcastTasks();
+      task.status = 'failed'; task.message = String((e && e.message) || e); task.errorType = isConfigError(e) ? 'config' : 'runtime'; task.updatedAt = Date.now(); logEvent('error', `任务失败 ${task.id}: ${task.message}`); noteTaskFailure(presetKey, e); persistTasks(); broadcastTasks();
     });
 }
 
@@ -245,6 +272,7 @@ async function handle(req, res) {
     const dedupKey = dedupKeyFor(body.idempotencyKey || req.headers['idempotency-key'], body.model, params);
     const dup = findDuplicate(dedupKey);
     if (dup) { logEvent('info', `幂等命中：复用任务 ${dup.id}`); return send(res, 200, { id: dup.id, status: dup.status === 'succeeded' ? 'succeeded' : 'pending', object: 'video' }); }
+    if (rejectIfBlocked(res, presetKey)) return;
     if (!submissionGuard(res)) return;
     const id = newId();
     const task = { id, status: 'pending', url: null, message: null, kind: config.presets[presetKey].capability, model: body.model, params, dedupKey, _session: true, createdAt: Date.now(), updatedAt: Date.now() };
@@ -268,6 +296,7 @@ async function handle(req, res) {
       if (dup.status === 'succeeded' && dup.url) { logEvent('info', `幂等命中(图片)：复用结果 ${dup.id}`); return send(res, 200, { created: Math.floor((dup.createdAt || Date.now()) / 1000), data: [{ url: dup.url }] }); }
       if (dup.status === 'running' || dup.status === 'pending') return send(res, 429, { error: { message: '相同请求正在生成，请稍候再试' } });
     }
+    if (rejectIfBlocked(res, presetKey)) return;
     if (!submissionGuard(res)) return;
     const id = newId();
     const task = { id, status: 'running', url: null, message: null, kind: 'image', model: body.model, params, dedupKey, _session: true, createdAt: Date.now(), updatedAt: Date.now() };
@@ -277,11 +306,11 @@ async function handle(req, res) {
     try {
       const r = await runTask(presetKey, gpuAlias, params, id);
       task.status = 'succeeded'; task.url = `${PUBLIC_BASE}/files/${r.file}`; task.updatedAt = Date.now();
-      logEvent('info', `任务成功 ${id}`); persistTasks();
+      logEvent('info', `任务成功 ${id}`); noteTaskSuccess(presetKey); persistTasks();
       return send(res, 200, { created: Math.floor(Date.now() / 1000), data: [{ url: task.url }] });
     } catch (e) {
-      task.status = 'failed'; task.message = String((e && e.message) || e); task.updatedAt = Date.now();
-      logEvent('error', `任务失败 ${id}: ${task.message}`); persistTasks();
+      task.status = 'failed'; task.message = String((e && e.message) || e); task.errorType = isConfigError(e) ? 'config' : 'runtime'; task.updatedAt = Date.now();
+      logEvent('error', `任务失败 ${id}: ${task.message}`); noteTaskFailure(presetKey, e); persistTasks();
       return send(res, 500, { error: { message: task.message } });
     }
   }
