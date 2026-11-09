@@ -49,6 +49,8 @@ docker run -d --name chenyu-bridge -p 3400:3400 \
 
 业务接口默认无鉴权；设置 `BRIDGE_API_KEY`（或后台「业务接口密钥」）后需 `Authorization: Bearer` 或 `x-api-key`。
 
+画幅参数（图片/视频通用）：`size` 既支持 `1024x1824`（宽×高，自动映射到最近档位），也支持 `9:16` 这类写法，或用 `aspect_ratio`；分辨率用 `resolution`（如 `3.0MP`）或 `megapixels`。
+
 ## 环境变量（均可选，多数可在后台设置）
 
 | 变量 | 说明 |
