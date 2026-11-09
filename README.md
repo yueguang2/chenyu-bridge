@@ -82,7 +82,7 @@ docker build -t chenyu-bridge:latest .
 
 ## 参与贡献
 
-欢迎提交 Issue 和 Pull Request，详细约定见 [CONTRIBUTING.md](CONTRIBUTING.md)；安全问题请按 [SECURITY.md](SECURITY.md) 私密报告，不要公开提交 Issue。
+欢迎提交 Issue 和 Pull Request，详细约定见 [CONTRIBUTING.md](CONTRIBUTING.md)；参与社区请遵守[贡献者行为准则](CODE_OF_CONDUCT.md)；安全问题请按 [SECURITY.md](SECURITY.md) 私密报告，不要公开提交 Issue。
 
 ## 许可证
 
